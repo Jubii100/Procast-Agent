@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: procast-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: procast
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./dump-demo-procast-202601271555.sql:/docker-entrypoint-initdb.d/dump.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Procast AI API
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: procast-ai-api
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/procast
+      - DATABASE_URL_READONLY=postgresql://procast_analyst:analyst_readonly@postgres:5432/procast
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - API_DEBUG=true
+      - LOG_LEVEL=INFO
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src:ro
+      - ./data:/app/data:ro
+    restart: unless-stopped
+
+  # Database setup (one-time init)
+  db-setup:
+    image: postgres:15-alpine
+    container_name: procast-db-setup
+    environment:
+      PGPASSWORD: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./scripts/setup_db.sh:/setup_db.sh:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # Wait for postgres
+        sleep 5
+        
+        # Create read-only user
+        psql -h postgres -U postgres -d procast << EOF
+        DROP USER IF EXISTS procast_analyst;
+        CREATE USER procast_analyst WITH PASSWORD 'analyst_readonly';
+        GRANT CONNECT ON DATABASE procast TO procast_analyst;
+        GRANT USAGE ON SCHEMA public TO procast_analyst;
+        GRANT SELECT ON ALL TABLES IN SCHEMA public TO procast_analyst;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO procast_analyst;
+        ALTER USER procast_analyst SET statement_timeout = '30s';
+        ALTER USER procast_analyst SET default_transaction_read_only = on;
+        EOF
+        
+        echo "Database setup complete!"
+    profiles:
+      - setup
+
+volumes:
+  postgres_data:
