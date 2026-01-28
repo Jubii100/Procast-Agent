@@ -13,12 +13,12 @@ This project provides an intelligent conversational agent that can analyze budge
 
 ## Features
 
-- 🔍 **Natural Language Queries**: Ask questions about budget data in plain English
-- 🧠 **Intelligent Analysis**: AI-generated insights with confidence scores
-- 🔒 **Read-Only Safety**: All database access is validated and read-only
-- 📊 **Comprehensive Analysis**: Budget overviews, overspending alerts, trend analysis
-- 🔄 **Multi-turn Conversations**: Session support for follow-up questions
-- 🎯 **JWT-Ready Auth**: Prepared for .NET backend JWT integration
+- **Natural Language Queries**: Ask questions about budget data in plain English
+- **Intelligent Analysis**: AI-generated insights with confidence scores
+- **Read-Only Safety**: All database access is validated and read-only
+- **Comprehensive Analysis**: Budget overviews, overspending alerts, trend analysis
+- **Multi-turn Conversations**: Session support for follow-up questions
+- **JWT-Ready Auth**: Prepared for .NET backend JWT integration
 
 ## Architecture
 
@@ -180,7 +180,7 @@ procast-ai/
 │   │   └── tools.py         # Database tools
 │   ├── db/                  # Database layer
 │   │   ├── connection.py    # Connection management
-│   │   └── queries.py       # Predefined queries
+│   │   └── schema_registry.py # Domain-split schema definitions
 │   ├── eval/                # Evaluation
 │   │   └── validator.py     # SQL/result validation
 │   └── core/                # Core utilities
