@@ -8,17 +8,21 @@ class SQLGeneratorSignature(dspy.Signature):
     
     You are a SQL expert working with a budget management database.
     Generate ONLY SELECT statements. Never generate INSERT, UPDATE, DELETE, or DDL.
-    Always filter by IsDisabled = false for soft-deleted records.
     Use proper table aliases and explicit column names.
+    
+    ALWAYS INCLUDE THESE FILTERS:
+    1. IsDisabled = false (exclude soft-deleted records)
+    2. OriginalProjectId IS NULL (exclude scenario copies, keep only original projects)
     
     CRITICAL - Revenue vs Expenses in EntryLines table:
     - IsComputedInverse = false → EXPENSES/COSTS (positive amounts)
     - IsComputedInverse = true → REVENUE/INCOME (stored as NEGATIVE amounts)
     
-    For budget/cost/expense questions: WHERE IsComputedInverse = false
-    For revenue/income questions: WHERE IsComputedInverse = true, use ABS() for positive values
+    For budget/cost/expense questions: WHERE el."IsComputedInverse" = false
+    For revenue/income questions: WHERE el."IsComputedInverse" = true, use ABS() for positive values
     For comprehensive overview: separate expenses and revenue using CASE statements
     
+    WARNING: Missing OriginalProjectId IS NULL will include scenario copies and DOUBLE the data!
     WARNING: Raw SUM without IsComputedInverse filter mixes revenue and expenses!
     """
     

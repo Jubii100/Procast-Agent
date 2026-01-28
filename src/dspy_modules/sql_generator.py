@@ -161,7 +161,9 @@ class SQLGeneratorWithExamples(dspy.Module):
     for common budget analysis patterns.
     """
 
-    # Few-shot examples for budget analysis - MUST filter by IsComputedInverse
+    # Few-shot examples for budget analysis
+    # MUST: 1) Filter by IsComputedInverse for revenue/expenses
+    #       2) Filter by OriginalProjectId IS NULL to exclude scenarios
     EXAMPLES = [
         dspy.Example(
             question="What is the total budget for all projects?",
@@ -178,7 +180,7 @@ WHERE p."IsDisabled" = false
 AND p."OriginalProjectId" IS NULL
 AND el."IsComputedInverse" = false
             '''.strip(),
-            explanation="Sums EXPENSE entry lines (IsComputedInverse=false) across all active projects. Revenue entries are excluded."
+            explanation="Sums EXPENSE entry lines across original projects only. Excludes: revenue (IsComputedInverse=true), scenarios (OriginalProjectId not null), disabled records."
         ).with_inputs("question", "schema_context", "table_descriptions"),
         
         dspy.Example(
@@ -198,7 +200,7 @@ JOIN "EntryLines" el ON el."ProjectAccountId" = pa."Id" AND el."IsDisabled" = fa
 WHERE p."IsDisabled" = false
 AND p."OriginalProjectId" IS NULL
             '''.strip(),
-            explanation="Separates expenses (IsComputedInverse=false) from revenue (IsComputedInverse=true, stored as negative). Calculates net profit."
+            explanation="Comprehensive overview of original projects only. Separates expenses (IsComputedInverse=false) from revenue (IsComputedInverse=true). Excludes scenario copies."
         ).with_inputs("question", "schema_context", "table_descriptions"),
         
         dspy.Example(
@@ -214,6 +216,7 @@ FROM "AccountCategories" ac
 JOIN "Accounts" a ON a."SubAccountCategoryId" = ac."Id"
 JOIN "LegalEntityAccounts" lea ON lea."AccountId" = a."Id"
 JOIN "ProjectAccounts" pa ON pa."LegalEntityAccountId" = lea."Id" AND pa."IsDisabled" = false
+JOIN "Projects" p ON p."Id" = pa."ProjectId" AND p."IsDisabled" = false AND p."OriginalProjectId" IS NULL
 JOIN "EntryLines" el ON el."ProjectAccountId" = pa."Id" AND el."IsDisabled" = false
 WHERE ac."IsDisabled" = false
 AND el."IsComputedInverse" = false
@@ -221,7 +224,7 @@ GROUP BY ac."Id", ac."Name"
 ORDER BY total_spending DESC
 LIMIT 10
             '''.strip(),
-            explanation="Groups EXPENSE entries by category (IsComputedInverse=false), ordered by total spending descending."
+            explanation="Groups EXPENSE entries by category for original projects only. Excludes revenue entries and scenario copies."
         ).with_inputs("question", "schema_context", "table_descriptions"),
         
         dspy.Example(
@@ -250,7 +253,7 @@ HAVING SUM(CASE WHEN el."IsComputedInverse" = false THEN el."Amount" * el."Quant
        ABS(SUM(CASE WHEN el."IsComputedInverse" = true THEN el."Amount" * el."Quantity" ELSE 0 END))
 ORDER BY expense_to_revenue_ratio DESC
             '''.strip(),
-            explanation="Identifies projects where expenses exceed revenue. Uses IsComputedInverse to separate costs from income."
+            explanation="Identifies original projects where expenses exceed revenue. Excludes scenario copies using OriginalProjectId IS NULL."
         ).with_inputs("question", "schema_context", "table_descriptions"),
     ]
 

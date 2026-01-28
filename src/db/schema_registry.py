@@ -29,15 +29,20 @@ DOMAINS:
 KEY FACTS:
 - Budget total = EntryLines.Amount × EntryLines.Quantity
 - Status >= 2 means committed spending
-- IsDisabled = true means soft-deleted (always filter)
-- Projects.OriginalProjectId links scenario copies
 - All monetary amounts need currency conversion via ConstantFxRates
+
+CRITICAL FILTERS (ALWAYS APPLY):
+1. IsDisabled = false (exclude soft-deleted records)
+2. OriginalProjectId IS NULL (exclude scenario copies - IMPORTANT!)
+   - Projects with OriginalProjectId set are "what-if" scenario copies
+   - Including scenarios will DOUBLE or TRIPLE the actual totals
+   - Always filter: WHERE p."OriginalProjectId" IS NULL
 
 CRITICAL - REVENUE VS EXPENSES:
 - EntryLines.IsComputedInverse = false → EXPENSES (costs, positive amounts)
 - EntryLines.IsComputedInverse = true → REVENUE (income, stored as NEGATIVE amounts)
-- For expense/cost queries: WHERE IsComputedInverse = false
-- For revenue queries: WHERE IsComputedInverse = true, use ABS() for positive values
+- For expense/cost queries: WHERE el."IsComputedInverse" = false
+- For revenue queries: WHERE el."IsComputedInverse" = true, use ABS() for positive values
 - Raw SUM without filtering will be NEGATIVE if revenue > expenses (profitable)
 """
 
@@ -424,24 +429,42 @@ EntryLines triggers → EntryLine_H (automatic audit)
 QUERY_PATTERNS = """
 ## COMMON SQL PATTERNS
 
+### REQUIRED FILTERS (ALWAYS INCLUDE):
+- WHERE p."IsDisabled" = false  -- exclude soft-deleted
+- AND p."OriginalProjectId" IS NULL  -- CRITICAL: exclude scenario copies!
+
+Without OriginalProjectId IS NULL, you will include "what-if" scenarios and DOUBLE the totals!
+
 ### ⭐ EXPENSES ONLY (most common for budget questions):
 SELECT SUM(el."Amount" * el."Quantity") as total_expenses
-FROM "EntryLines" el 
-WHERE el."IsDisabled" = false AND el."IsComputedInverse" = false
+FROM "Projects" p
+JOIN "ProjectAccounts" pa ON pa."ProjectId" = p."Id" AND pa."IsDisabled" = false
+JOIN "EntryLines" el ON el."ProjectAccountId" = pa."Id" AND el."IsDisabled" = false
+WHERE p."IsDisabled" = false 
+  AND p."OriginalProjectId" IS NULL
+  AND el."IsComputedInverse" = false
 
 ### ⭐ REVENUE ONLY (use ABS for positive values):
 SELECT ABS(SUM(el."Amount" * el."Quantity")) as total_revenue
-FROM "EntryLines" el 
-WHERE el."IsDisabled" = false AND el."IsComputedInverse" = true
+FROM "Projects" p
+JOIN "ProjectAccounts" pa ON pa."ProjectId" = p."Id" AND pa."IsDisabled" = false
+JOIN "EntryLines" el ON el."ProjectAccountId" = pa."Id" AND el."IsDisabled" = false
+WHERE p."IsDisabled" = false 
+  AND p."OriginalProjectId" IS NULL
+  AND el."IsComputedInverse" = true
 
 ### ⭐ COMPREHENSIVE REVENUE VS EXPENSES OVERVIEW:
 SELECT 
+    COUNT(DISTINCT p."Id") as project_count,
     SUM(CASE WHEN el."IsComputedInverse" = false THEN el."Amount" * el."Quantity" ELSE 0 END) as total_expenses,
     ABS(SUM(CASE WHEN el."IsComputedInverse" = true THEN el."Amount" * el."Quantity" ELSE 0 END)) as total_revenue,
     ABS(SUM(CASE WHEN el."IsComputedInverse" = true THEN el."Amount" * el."Quantity" ELSE 0 END)) - 
     SUM(CASE WHEN el."IsComputedInverse" = false THEN el."Amount" * el."Quantity" ELSE 0 END) as net_profit
-FROM "EntryLines" el
-WHERE el."IsDisabled" = false
+FROM "Projects" p
+JOIN "ProjectAccounts" pa ON pa."ProjectId" = p."Id" AND pa."IsDisabled" = false
+JOIN "EntryLines" el ON el."ProjectAccountId" = pa."Id" AND el."IsDisabled" = false
+WHERE p."IsDisabled" = false
+  AND p."OriginalProjectId" IS NULL
 
 ### Committed vs Budgeted (expenses only):
 SUM(CASE WHEN el."Status" >= 2 AND el."IsComputedInverse" = false 
@@ -451,12 +474,6 @@ SUM(CASE WHEN el."Status" >= 2 AND el."IsComputedInverse" = false
 JOIN "LegalEntityAccounts" lea ON lea."Id" = pa."LegalEntityAccountId"
 JOIN "Accounts" a ON a."Id" = lea."AccountId"
 JOIN "AccountCategories" ac ON ac."Id" = a."SubAccountCategoryId"
-
-### Exclude Scenarios:
-WHERE p."OriginalProjectId" IS NULL
-
-### Always Filter:
-WHERE [table]."IsDisabled" = false
 """
 
 
