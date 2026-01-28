@@ -32,6 +32,13 @@ KEY FACTS:
 - IsDisabled = true means soft-deleted (always filter)
 - Projects.OriginalProjectId links scenario copies
 - All monetary amounts need currency conversion via ConstantFxRates
+
+CRITICAL - REVENUE VS EXPENSES:
+- EntryLines.IsComputedInverse = false → EXPENSES (costs, positive amounts)
+- EntryLines.IsComputedInverse = true → REVENUE (income, stored as NEGATIVE amounts)
+- For expense/cost queries: WHERE IsComputedInverse = false
+- For revenue queries: WHERE IsComputedInverse = true, use ABS() for positive values
+- Raw SUM without filtering will be NEGATIVE if revenue > expenses (profitable)
 """
 
 # =============================================================================
@@ -116,7 +123,7 @@ DOMAIN_SCHEMAS = {
 - Id: uuid PK
 - Description: varchar(2048)
 - Quantity: double precision - Number of units
-- Amount: double precision - Unit price
+- Amount: double precision - Unit price (CAN BE NEGATIVE for revenue!)
 - Status: integer (0=Draft, 1=Pending, 2+=Committed)
 - OwnerId: uuid FK → People
 - ProjectAccountId: uuid FK → ProjectAccounts
@@ -127,11 +134,22 @@ DOMAIN_SCHEMAS = {
 - InvoiceRefCode: varchar(256)
 - SupplierName: varchar(256)
 - ReconciliationId: uuid FK → Reconciliations
-- IsComputedInverse: boolean (revenue flag)
+- IsComputedInverse: boolean ⭐ CRITICAL FLAG (see below)
 - IsDisabled: boolean
 
 CALCULATION: Total = Amount × Quantity
 FILTER: Always use IsDisabled = false
+
+⭐ CRITICAL - IsComputedInverse FLAG:
+- IsComputedInverse = false → EXPENSE/COST entries (Amount is positive)
+- IsComputedInverse = true → REVENUE/INCOME entries (Amount is NEGATIVE)
+
+QUERY PATTERNS:
+- Total EXPENSES: WHERE IsComputedInverse = false, SUM(Amount * Quantity)
+- Total REVENUE: WHERE IsComputedInverse = true, ABS(SUM(Amount * Quantity))
+- NET POSITION: SUM all (negative = profitable, revenue > costs)
+
+WARNING: Raw SUM without filtering IsComputedInverse will mix revenue and expenses!
 
 ### EntryLine_H (Audit history of budget changes) ⭐ TREND ANALYSIS
 - Id: uuid PK
@@ -406,11 +424,28 @@ EntryLines triggers → EntryLine_H (automatic audit)
 QUERY_PATTERNS = """
 ## COMMON SQL PATTERNS
 
-### Budget Total:
-SELECT SUM(el."Amount" * el."Quantity") FROM "EntryLines" el WHERE el."IsDisabled" = false
+### ⭐ EXPENSES ONLY (most common for budget questions):
+SELECT SUM(el."Amount" * el."Quantity") as total_expenses
+FROM "EntryLines" el 
+WHERE el."IsDisabled" = false AND el."IsComputedInverse" = false
 
-### Committed vs Budgeted:
-SUM(CASE WHEN el."Status" >= 2 THEN el."Amount" * el."Quantity" ELSE 0 END) as committed
+### ⭐ REVENUE ONLY (use ABS for positive values):
+SELECT ABS(SUM(el."Amount" * el."Quantity")) as total_revenue
+FROM "EntryLines" el 
+WHERE el."IsDisabled" = false AND el."IsComputedInverse" = true
+
+### ⭐ COMPREHENSIVE REVENUE VS EXPENSES OVERVIEW:
+SELECT 
+    SUM(CASE WHEN el."IsComputedInverse" = false THEN el."Amount" * el."Quantity" ELSE 0 END) as total_expenses,
+    ABS(SUM(CASE WHEN el."IsComputedInverse" = true THEN el."Amount" * el."Quantity" ELSE 0 END)) as total_revenue,
+    ABS(SUM(CASE WHEN el."IsComputedInverse" = true THEN el."Amount" * el."Quantity" ELSE 0 END)) - 
+    SUM(CASE WHEN el."IsComputedInverse" = false THEN el."Amount" * el."Quantity" ELSE 0 END) as net_profit
+FROM "EntryLines" el
+WHERE el."IsDisabled" = false
+
+### Committed vs Budgeted (expenses only):
+SUM(CASE WHEN el."Status" >= 2 AND el."IsComputedInverse" = false 
+    THEN el."Amount" * el."Quantity" ELSE 0 END) as committed_expenses
 
 ### Join to Categories:
 JOIN "LegalEntityAccounts" lea ON lea."Id" = pa."LegalEntityAccountId"
