@@ -161,7 +161,7 @@ class SQLGeneratorWithExamples(dspy.Module):
     for common budget analysis patterns.
     """
 
-    # Few-shot examples for budget analysis (schema-agnostic patterns)
+    # Few-shot examples for budget analysis - MUST filter by IsComputedInverse
     EXAMPLES = [
         dspy.Example(
             question="What is the total budget for all projects?",
@@ -170,14 +170,35 @@ class SQLGeneratorWithExamples(dspy.Module):
             sql_query='''
 SELECT 
     COUNT(DISTINCT p."Id") as project_count,
-    SUM(el."Amount" * el."Quantity") as total_budget
+    SUM(el."Amount" * el."Quantity") as total_expenses
+FROM "Projects" p
+JOIN "ProjectAccounts" pa ON pa."ProjectId" = p."Id" AND pa."IsDisabled" = false
+JOIN "EntryLines" el ON el."ProjectAccountId" = pa."Id" AND el."IsDisabled" = false
+WHERE p."IsDisabled" = false
+AND p."OriginalProjectId" IS NULL
+AND el."IsComputedInverse" = false
+            '''.strip(),
+            explanation="Sums EXPENSE entry lines (IsComputedInverse=false) across all active projects. Revenue entries are excluded."
+        ).with_inputs("question", "schema_context", "table_descriptions"),
+        
+        dspy.Example(
+            question="Give me a comprehensive overview of revenue vs expenses",
+            schema_context="[Schema provided dynamically]",
+            table_descriptions="",
+            sql_query='''
+SELECT 
+    COUNT(DISTINCT p."Id") as project_count,
+    SUM(CASE WHEN el."IsComputedInverse" = false THEN el."Amount" * el."Quantity" ELSE 0 END) as total_expenses,
+    ABS(SUM(CASE WHEN el."IsComputedInverse" = true THEN el."Amount" * el."Quantity" ELSE 0 END)) as total_revenue,
+    ABS(SUM(CASE WHEN el."IsComputedInverse" = true THEN el."Amount" * el."Quantity" ELSE 0 END)) - 
+    SUM(CASE WHEN el."IsComputedInverse" = false THEN el."Amount" * el."Quantity" ELSE 0 END) as net_profit
 FROM "Projects" p
 JOIN "ProjectAccounts" pa ON pa."ProjectId" = p."Id" AND pa."IsDisabled" = false
 JOIN "EntryLines" el ON el."ProjectAccountId" = pa."Id" AND el."IsDisabled" = false
 WHERE p."IsDisabled" = false
 AND p."OriginalProjectId" IS NULL
             '''.strip(),
-            explanation="Sums all entry lines (Amount * Quantity) across all active projects, excluding scenarios."
+            explanation="Separates expenses (IsComputedInverse=false) from revenue (IsComputedInverse=true, stored as negative). Calculates net profit."
         ).with_inputs("question", "schema_context", "table_descriptions"),
         
         dspy.Example(
@@ -188,18 +209,19 @@ AND p."OriginalProjectId" IS NULL
 SELECT 
     ac."Name" as category_name,
     COUNT(el."Id") as entry_count,
-    SUM(el."Amount" * el."Quantity") as total_amount
+    SUM(el."Amount" * el."Quantity") as total_spending
 FROM "AccountCategories" ac
 JOIN "Accounts" a ON a."SubAccountCategoryId" = ac."Id"
 JOIN "LegalEntityAccounts" lea ON lea."AccountId" = a."Id"
 JOIN "ProjectAccounts" pa ON pa."LegalEntityAccountId" = lea."Id" AND pa."IsDisabled" = false
 JOIN "EntryLines" el ON el."ProjectAccountId" = pa."Id" AND el."IsDisabled" = false
 WHERE ac."IsDisabled" = false
+AND el."IsComputedInverse" = false
 GROUP BY ac."Id", ac."Name"
-ORDER BY total_amount DESC
+ORDER BY total_spending DESC
 LIMIT 10
             '''.strip(),
-            explanation="Groups spending by account category, ordering by total amount descending."
+            explanation="Groups EXPENSE entries by category (IsComputedInverse=false), ordered by total spending descending."
         ).with_inputs("question", "schema_context", "table_descriptions"),
         
         dspy.Example(
@@ -210,24 +232,25 @@ LIMIT 10
 SELECT 
     p."Brand" as project_name,
     p."TakePlaceDate" as event_date,
-    SUM(el."Amount" * el."Quantity") as budgeted,
-    SUM(CASE WHEN el."Status" >= 2 THEN el."Amount" * el."Quantity" ELSE 0 END) as committed,
+    SUM(CASE WHEN el."IsComputedInverse" = false THEN el."Amount" * el."Quantity" ELSE 0 END) as total_expenses,
+    SUM(CASE WHEN el."IsComputedInverse" = false AND el."Status" >= 2 THEN el."Amount" * el."Quantity" ELSE 0 END) as committed_expenses,
+    ABS(SUM(CASE WHEN el."IsComputedInverse" = true THEN el."Amount" * el."Quantity" ELSE 0 END)) as total_revenue,
     ROUND(
-        (SUM(CASE WHEN el."Status" >= 2 THEN el."Amount" * el."Quantity" ELSE 0 END) / 
-         NULLIF(SUM(el."Amount" * el."Quantity"), 0) * 100)::numeric, 
+        (SUM(CASE WHEN el."IsComputedInverse" = false THEN el."Amount" * el."Quantity" ELSE 0 END) / 
+         NULLIF(ABS(SUM(CASE WHEN el."IsComputedInverse" = true THEN el."Amount" * el."Quantity" ELSE 0 END)), 0) * 100)::numeric, 
         2
-    ) as percentage_used
+    ) as expense_to_revenue_ratio
 FROM "Projects" p
 JOIN "ProjectAccounts" pa ON pa."ProjectId" = p."Id" AND pa."IsDisabled" = false
 JOIN "EntryLines" el ON el."ProjectAccountId" = pa."Id" AND el."IsDisabled" = false
 WHERE p."IsDisabled" = false
 AND p."OriginalProjectId" IS NULL
 GROUP BY p."Id", p."Brand", p."TakePlaceDate"
-HAVING SUM(CASE WHEN el."Status" >= 2 THEN el."Amount" * el."Quantity" ELSE 0 END) > 
-       SUM(el."Amount" * el."Quantity")
-ORDER BY percentage_used DESC
+HAVING SUM(CASE WHEN el."IsComputedInverse" = false THEN el."Amount" * el."Quantity" ELSE 0 END) > 
+       ABS(SUM(CASE WHEN el."IsComputedInverse" = true THEN el."Amount" * el."Quantity" ELSE 0 END))
+ORDER BY expense_to_revenue_ratio DESC
             '''.strip(),
-            explanation="Identifies projects where committed spending exceeds budgeted amounts."
+            explanation="Identifies projects where expenses exceed revenue. Uses IsComputedInverse to separate costs from income."
         ).with_inputs("question", "schema_context", "table_descriptions"),
     ]
 

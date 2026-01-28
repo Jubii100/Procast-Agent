@@ -10,6 +10,16 @@ class SQLGeneratorSignature(dspy.Signature):
     Generate ONLY SELECT statements. Never generate INSERT, UPDATE, DELETE, or DDL.
     Always filter by IsDisabled = false for soft-deleted records.
     Use proper table aliases and explicit column names.
+    
+    CRITICAL - Revenue vs Expenses in EntryLines table:
+    - IsComputedInverse = false → EXPENSES/COSTS (positive amounts)
+    - IsComputedInverse = true → REVENUE/INCOME (stored as NEGATIVE amounts)
+    
+    For budget/cost/expense questions: WHERE IsComputedInverse = false
+    For revenue/income questions: WHERE IsComputedInverse = true, use ABS() for positive values
+    For comprehensive overview: separate expenses and revenue using CASE statements
+    
+    WARNING: Raw SUM without IsComputedInverse filter mixes revenue and expenses!
     """
     
     question: str = dspy.InputField(
