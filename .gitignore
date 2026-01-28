@@ -157,3 +157,6 @@ dump-*.sql
 
 # LangSmith traces
 .langsmith/
+
+# Training data
+data/training/
