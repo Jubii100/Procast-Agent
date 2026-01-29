@@ -9,7 +9,7 @@ from src.agent.state import AgentState, add_assistant_message, format_conversati
 from src.dspy_modules.classifier import IntentClassifier
 from src.dspy_modules.sql_generator import SQLGenerator
 from src.dspy_modules.analyzer import AnalysisSynthesizer
-from src.dspy_modules.table_selector import TableSelectorWithRules
+from src.dspy_modules.table_selector import TableSelector
 from src.db.schema_registry import build_schema_context, get_db_summary
 from src.mcp.tools import DatabaseTools, SQLValidator
 from src.db.connection import DatabaseManager
@@ -47,11 +47,11 @@ def _get_analyzer() -> AnalysisSynthesizer:
     return _analyzer
 
 
-def _get_table_selector() -> TableSelectorWithRules:
-    """Lazy-load the table selector."""
+def _get_table_selector() -> TableSelector:
+    """Lazy-load the table selector (uses cheap LLM model)."""
     global _table_selector
     if _table_selector is None:
-        _table_selector = TableSelectorWithRules(use_llm_fallback=True)
+        _table_selector = TableSelector()
     return _table_selector
 
 
@@ -103,9 +103,9 @@ async def select_tables_node(state: AgentState) -> dict[str, Any]:
     """
     Node: Select relevant database domains for the query.
     
-    Uses rule-based selection first (zero LLM cost for common patterns),
-    with LLM fallback for ambiguous queries. This minimizes token usage
-    by only loading schemas for relevant tables.
+    Uses a cheap LLM model (claude-3-5-haiku) to intelligently select
+    which domains are needed for the query. This minimizes token usage
+    in the main SQL generation step by only loading relevant schemas.
     """
     logger.info("Selecting relevant domains", session_id=state["session_id"])
     
@@ -126,14 +126,11 @@ async def select_tables_node(state: AgentState) -> dict[str, Any]:
             reasoning=result.reasoning[:100] if result.reasoning else None,
         )
         
-        # Check if this used LLM (rule-based selection is free)
-        llm_call_increment = 0 if "Rule-based" in (result.reasoning or "") else 1
-        
         return {
             "selected_domains": domains,
             "schema_context": schema_context.full_context,
             "domain_selection_reasoning": result.reasoning,
-            "total_llm_calls": state["total_llm_calls"] + llm_call_increment,
+            "total_llm_calls": state["total_llm_calls"] + 1,
         }
         
     except Exception as e:

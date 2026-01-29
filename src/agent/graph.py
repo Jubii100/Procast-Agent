@@ -24,9 +24,56 @@ from src.agent.routing import (
     route_after_query_execution,
 )
 from src.db.connection import DatabaseManager
-from src.dspy_modules.config import configure_claude
+from src.dspy_modules.config import (
+    configure_claude,
+    get_lm_usage_entries,
+    get_lm_usage_snapshot,
+    restore_lm_cache_state,
+    set_lm_cache_enabled,
+)
 
 logger = structlog.get_logger(__name__)
+
+
+def _extract_usage_counts(usage: dict) -> tuple[Optional[int], Optional[int], Optional[int]]:
+    prompt_tokens = usage.get("prompt_tokens")
+    completion_tokens = usage.get("completion_tokens")
+
+    if prompt_tokens is None:
+        prompt_tokens = usage.get("input_tokens")
+    if completion_tokens is None:
+        completion_tokens = usage.get("output_tokens")
+
+    total_tokens = usage.get("total_tokens")
+    if total_tokens is None and prompt_tokens is not None and completion_tokens is not None:
+        total_tokens = prompt_tokens + completion_tokens
+
+    return prompt_tokens, completion_tokens, total_tokens
+
+
+def _log_lm_usage(entries: list[dict], session_id: Optional[str]) -> None:
+    if not entries:
+        logger.warning(
+            "No SDK usage metadata captured for LLM calls",
+            session_id=session_id,
+        )
+        return
+
+    for entry in entries:
+        usage = entry.get("usage") or {}
+        prompt_tokens, completion_tokens, total_tokens = _extract_usage_counts(usage)
+        logger.info(
+            "LLM usage",
+            session_id=session_id,
+            model=entry.get("model"),
+            lm_label=entry.get("lm_label"),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            cost=entry.get("cost"),
+            cache_hit=entry.get("cache_hit"),
+            usage=usage if not (prompt_tokens or completion_tokens or total_tokens) else None,
+        )
 
 
 def create_agent_graph() -> StateGraph:
@@ -161,6 +208,7 @@ class ProcastAgent:
         question: str,
         user_id: str = "anonymous",
         session_id: Optional[str] = None,
+        use_cache: Optional[bool] = None,
     ) -> dict:
         """
         Run a query through the agent.
@@ -169,6 +217,7 @@ class ProcastAgent:
             question: The user's question
             user_id: User identifier
             session_id: Session identifier
+            use_cache: Override LLM caching for this query (True/False)
             
         Returns:
             Dictionary with response and metadata
@@ -180,6 +229,7 @@ class ProcastAgent:
             "Processing query",
             question=question[:100],
             user_id=user_id,
+            use_cache=use_cache,
         )
         
         # Create initial state
@@ -188,9 +238,21 @@ class ProcastAgent:
             user_id=user_id,
             session_id=session_id,
         )
+
+        cache_state = None
+        if use_cache is not None:
+            cache_state = set_lm_cache_enabled(use_cache, initialize=True)
+
+        usage_snapshot = get_lm_usage_snapshot()
         
         # Run the graph
-        final_state = await self._graph.ainvoke(initial_state)
+        try:
+            final_state = await self._graph.ainvoke(initial_state)
+        finally:
+            if cache_state is not None:
+                restore_lm_cache_state(cache_state)
+
+        _log_lm_usage(get_lm_usage_entries(usage_snapshot), final_state.get("session_id"))
         
         logger.info(
             "Query completed",

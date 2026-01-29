@@ -14,6 +14,7 @@ from src.db.schema_registry import (
     get_all_domains,
     DOMAIN_TABLES,
 )
+from src.dspy_modules.config import get_auxiliary_lm
 
 logger = structlog.get_logger(__name__)
 
@@ -23,7 +24,7 @@ class TableSelectorSignature(dspy.Signature):
     
     Given a user question about budget/financial data and a summary of available
     database domains, identify which domains contain the tables needed to answer
-    the question. Be selective - only include domains that are truly necessary.
+    the question. Be selective - only include domains that are remotely necessary.
     """
     
     question: str = dspy.InputField(
@@ -116,6 +117,9 @@ class TableSelector(dspy.Module):
         """
         Select relevant domains for the question.
         
+        Uses a cheaper auxiliary LLM model (configured via settings.llm_auxiliary_model)
+        to reduce costs while handling the full complexity of domain selection.
+        
         Args:
             question: User's natural language question
             db_summary: Optional custom database summary
@@ -127,11 +131,14 @@ class TableSelector(dspy.Module):
         
         logger.debug("Selecting domains for question", question=question[:100])
         
-        result = self.select(
-            question=question,
-            db_summary=db_summary,
-            available_domains=DOMAIN_DESCRIPTIONS,
-        )
+        # Use the cheaper auxiliary LM for this call
+        auxiliary_lm = get_auxiliary_lm()
+        with dspy.context(lm=auxiliary_lm):
+            result = self.select(
+                question=question,
+                db_summary=db_summary,
+                available_domains=DOMAIN_DESCRIPTIONS,
+            )
         
         # Parse and validate selected domains
         selected = self._parse_domains(result.selected_domains)
@@ -255,24 +262,19 @@ class TableSelectorWithRules(dspy.Module):
         )
 
 
-def select_domains_for_question(
-    question: str,
-    use_rules_first: bool = True,
-) -> list[str]:
+def select_domains_for_question(question: str) -> list[str]:
     """
     Convenience function to select domains for a question.
     
+    Uses a cheap LLM model (claude-3-5-haiku) to intelligently select
+    relevant domains for the given question.
+    
     Args:
         question: User's natural language question
-        use_rules_first: Try rule-based selection before LLM
         
     Returns:
         List of selected domain names
     """
-    if use_rules_first:
-        selector = TableSelectorWithRules(use_llm_fallback=True)
-    else:
-        selector = TableSelector()
-    
+    selector = TableSelector()
     result = selector(question=question)
     return result.selected_domains

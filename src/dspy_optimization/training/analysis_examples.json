@@ -1,0 +1,38 @@
+[
+  {
+    "inputs": {
+      "question": "What is our budget status?",
+      "query_results": "[{\"project_name\": \"Summit 2026\", \"budgeted\": 500000, \"committed\": 425000}, {\"project_name\": \"Conference Q2\", \"budgeted\": 200000, \"committed\": 180000}]",
+      "budget_context": "Overspending is when committed > budgeted. At-risk is >80% utilized."
+    },
+    "outputs": {
+      "analysis": "## Budget Status Overview\n\nBased on the current data:\n\n### Summit 2026\n- **Budgeted**: $500,000\n- **Committed**: $425,000\n- **Utilization**: 85%\n- **Status**: ⚠️ AT RISK\n\n### Conference Q2\n- **Budgeted**: $200,000\n- **Committed**: $180,000\n- **Utilization**: 90%\n- **Status**: ⚠️ AT RISK\n\nBoth projects are approaching their budget limits with utilization above 80%.",
+      "recommendations": "1. Review uncommitted items for potential deferrals\n2. Consider a soft spending freeze on Conference Q2\n3. Prepare variance reports for stakeholders\n4. Identify cost-saving opportunities",
+      "confidence": 0.92
+    }
+  },
+  {
+    "inputs": {
+      "question": "Which categories have the highest spending?",
+      "query_results": "[{\"category_name\": \"Venue & Catering\", \"total_amount\": 150000}, {\"category_name\": \"Marketing\", \"total_amount\": 80000}, {\"category_name\": \"Technology\", \"total_amount\": 45000}]",
+      "budget_context": "Categories help track where money is being spent."
+    },
+    "outputs": {
+      "analysis": "## Spending by Category\n\nTop spending categories:\n\n| Category | Amount | % of Total |\n|----------|--------|------------|\n| Venue & Catering | $150,000 | 54.5% |\n| Marketing | $80,000 | 29.1% |\n| Technology | $45,000 | 16.4% |\n\n**Total**: $275,000\n\nVenue & Catering dominates at over half of all spending, which is typical for event budgets.",
+      "recommendations": "1. Review Venue & Catering contracts for potential savings\n2. Consider if Marketing spend is aligned with expected ROI\n3. Technology costs appear reasonable for event support",
+      "confidence": 0.88
+    }
+  },
+  {
+    "inputs": {
+      "question": "Are there any overspending issues?",
+      "query_results": "[{\"project_name\": \"Workshop Series\", \"budgeted\": 50000, \"committed\": 62000, \"percentage_used\": 124}]",
+      "budget_context": "Overspending requires immediate attention and escalation."
+    },
+    "outputs": {
+      "analysis": "## ⚠️ Overspending Alert\n\n**Workshop Series** is currently **24% over budget**:\n\n- **Budgeted**: $50,000\n- **Committed**: $62,000\n- **Overage**: $12,000\n\nThis requires immediate attention as the project has exceeded its approved budget.\n\n### Impact Analysis\nThe $12,000 overage represents a significant variance that will affect overall portfolio performance.",
+      "recommendations": "1. **Immediate**: Freeze all new commitments for this project\n2. **Review**: Audit all committed items for potential reversals\n3. **Escalate**: Notify project owner and finance team\n4. **Document**: Prepare variance explanation for stakeholders\n5. **Action**: Request budget increase or identify offsetting savings",
+      "confidence": 0.95
+    }
+  }
+]

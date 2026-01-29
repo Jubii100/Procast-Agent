@@ -1,0 +1,57 @@
+[
+  {
+    "inputs": {
+      "question": "What is the total budget for all active projects?",
+      "schema_context": "Projects table contains events with budgets. EntryLines contain individual budget items.",
+      "table_descriptions": "Projects: Id, Brand, TakePlaceDate. EntryLines: Amount, Quantity, ProjectAccountId."
+    },
+    "outputs": {
+      "sql_query": "SELECT COUNT(DISTINCT p.\"Id\") as project_count, SUM(el.\"Amount\" * el.\"Quantity\") as total_budget FROM \"Projects\" p JOIN \"ProjectAccounts\" pa ON pa.\"ProjectId\" = p.\"Id\" AND pa.\"IsDisabled\" = false JOIN \"EntryLines\" el ON el.\"ProjectAccountId\" = pa.\"Id\" AND el.\"IsDisabled\" = false WHERE p.\"IsDisabled\" = false AND p.\"OriginalProjectId\" IS NULL",
+      "explanation": "Sums all entry lines (Amount * Quantity) across active projects, excluding scenarios."
+    }
+  },
+  {
+    "inputs": {
+      "question": "Show me the top 5 spending categories",
+      "schema_context": "AccountCategories organize expenses hierarchically. Accounts belong to categories.",
+      "table_descriptions": "AccountCategories: Name, ParentCategoryId. Accounts: SubAccountCategoryId."
+    },
+    "outputs": {
+      "sql_query": "SELECT ac.\"Name\" as category_name, SUM(el.\"Amount\" * el.\"Quantity\") as total_amount FROM \"AccountCategories\" ac JOIN \"Accounts\" a ON a.\"SubAccountCategoryId\" = ac.\"Id\" JOIN \"LegalEntityAccounts\" lea ON lea.\"AccountId\" = a.\"Id\" JOIN \"ProjectAccounts\" pa ON pa.\"LegalEntityAccountId\" = lea.\"Id\" AND pa.\"IsDisabled\" = false JOIN \"EntryLines\" el ON el.\"ProjectAccountId\" = pa.\"Id\" AND el.\"IsDisabled\" = false WHERE ac.\"IsDisabled\" = false GROUP BY ac.\"Id\", ac.\"Name\" ORDER BY total_amount DESC LIMIT 5",
+      "explanation": "Groups spending by category and returns top 5 by total amount."
+    }
+  },
+  {
+    "inputs": {
+      "question": "Which projects are over budget?",
+      "schema_context": "EntryLines have Status field where higher values indicate committed spending.",
+      "table_descriptions": "EntryLines: Status (>=2 means committed), Amount, Quantity."
+    },
+    "outputs": {
+      "sql_query": "SELECT p.\"Brand\" as project_name, SUM(el.\"Amount\" * el.\"Quantity\") as budgeted, SUM(CASE WHEN el.\"Status\" >= 2 THEN el.\"Amount\" * el.\"Quantity\" ELSE 0 END) as committed FROM \"Projects\" p JOIN \"ProjectAccounts\" pa ON pa.\"ProjectId\" = p.\"Id\" AND pa.\"IsDisabled\" = false JOIN \"EntryLines\" el ON el.\"ProjectAccountId\" = pa.\"Id\" AND el.\"IsDisabled\" = false WHERE p.\"IsDisabled\" = false AND p.\"OriginalProjectId\" IS NULL GROUP BY p.\"Id\", p.\"Brand\" HAVING SUM(CASE WHEN el.\"Status\" >= 2 THEN el.\"Amount\" * el.\"Quantity\" ELSE 0 END) > SUM(el.\"Amount\" * el.\"Quantity\")",
+      "explanation": "Finds projects where committed spending exceeds budgeted amounts."
+    }
+  },
+  {
+    "inputs": {
+      "question": "What were the recent budget changes?",
+      "schema_context": "EntryLine_H tracks historical changes to budget entries.",
+      "table_descriptions": "EntryLine_H: Action, Created, LatestViewTotalCurrent, LatestViewTotalPrevious."
+    },
+    "outputs": {
+      "sql_query": "SELECT h.\"Created\" as change_date, h.\"Action\" as action_type, h.\"LatestViewTotalCurrent\" - h.\"LatestViewTotalPrevious\" as change_amount, p.\"Brand\" as project_name FROM \"EntryLine_H\" h JOIN \"ProjectAccounts\" pa ON pa.\"Id\" = h.\"ProjectAccountId\" JOIN \"Projects\" p ON p.\"Id\" = pa.\"ProjectId\" WHERE h.\"IsDisabled\" = false AND h.\"Created\" >= NOW() - INTERVAL '7 days' ORDER BY h.\"Created\" DESC LIMIT 20",
+      "explanation": "Shows recent budget changes from the last 7 days with change amounts."
+    }
+  },
+  {
+    "inputs": {
+      "question": "How much have we spent on invoices this year?",
+      "schema_context": "Invoices table contains posted invoice data with amounts.",
+      "table_descriptions": "Invoices: LocalCurrencyTotal, DateApplied, PostedFlag."
+    },
+    "outputs": {
+      "sql_query": "SELECT COUNT(*) as invoice_count, SUM(i.\"LocalCurrencyTotal\") as total_invoiced FROM \"Invoices\" i WHERE i.\"IsDisabled\" = false AND i.\"PostedFlag\" = true AND EXTRACT(YEAR FROM i.\"DateApplied\") = EXTRACT(YEAR FROM CURRENT_DATE)",
+      "explanation": "Sums all posted invoices from the current year."
+    }
+  }
+]

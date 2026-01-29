@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     )
     llm_max_tokens: int = Field(default=4096, ge=256, le=8192)
     llm_temperature: float = Field(default=0.0, ge=0.0, le=1.0)
+    llm_auxiliary_model: str = Field(
+        default="claude-3-5-haiku-20241022",
+        description="Cheaper model for auxiliary tasks (domain selection, intent classification)",
+    )
+    llm_cache_enabled: bool = Field(
+        default=True,
+        description="Enable DSPy request caching for LLM calls",
+    )
 
     # ==========================================================================
     # API Configuration
