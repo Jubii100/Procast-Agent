@@ -15,11 +15,12 @@ MAX_SQL_RETRIES = 3
 
 def route_after_classification(
     state: AgentState,
-) -> Literal["select_tables", "handle_clarification", "handle_general_info"]:
+) -> Literal["select_tables", "handle_clarification", "handle_general_info", "handle_friendly_chat"]:
     """
     Route based on intent classification.
     
     For db_query intent, routes to select_tables first (cost-efficient schema loading).
+    For friendly_chat intent, routes to a friendly response handler (no DB access).
     
     Args:
         state: Current agent state
@@ -33,6 +34,8 @@ def route_after_classification(
     
     if intent == "clarify" or state.get("clarification_needed"):
         return "handle_clarification"
+    elif intent == "friendly_chat":
+        return "handle_friendly_chat"
     elif intent == "general_info" and not state.get("requires_db_query"):
         return "handle_general_info"
     else:

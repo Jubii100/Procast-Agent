@@ -25,9 +25,12 @@ class AgentState(TypedDict):
     # Conversation
     messages: Annotated[list[Message], operator.add]
     
-    # User context (for future JWT integration)
+    # User context (for JWT integration and RLS scoping)
     user_id: str
     session_id: str
+    email: Optional[str]  # User's email for person lookup
+    person_id: Optional[str]  # Resolved from email or JWT, used for RLS
+    company_id: Optional[str]  # Company ID for future company-level scoping
     
     # Intent classification
     intent: str  # "db_query", "clarify", "general_info"
@@ -74,6 +77,10 @@ def create_initial_state(
     user_message: str,
     user_id: str = "anonymous",
     session_id: Optional[str] = None,
+    email: Optional[str] = None,
+    person_id: Optional[str] = None,
+    company_id: Optional[str] = None,
+    conversation_history: Optional[list[dict[str, Any]]] = None,
 ) -> AgentState:
     """
     Create an initial agent state for a new query.
@@ -82,6 +89,10 @@ def create_initial_state(
         user_message: The user's question or request
         user_id: User identifier (for JWT integration)
         session_id: Session identifier (auto-generated if not provided)
+        email: User's email for RLS person lookup
+        person_id: Pre-resolved person_id (from JWT or previous lookup)
+        company_id: Pre-resolved company_id (from JWT or previous lookup)
+        conversation_history: Optional list of previous messages to load
         
     Returns:
         Initialized AgentState
@@ -91,17 +102,38 @@ def create_initial_state(
     session_id = session_id or str(uuid.uuid4())
     timestamp = datetime.utcnow().isoformat()
     
-    return AgentState(
-        messages=[
-            Message(
-                role="user",
-                content=user_message,
-                timestamp=timestamp,
-                metadata=None,
+    # Build messages list from history + current message
+    messages: list[Message] = []
+    
+    # Add conversation history if provided
+    if conversation_history:
+        for msg in conversation_history:
+            messages.append(
+                Message(
+                    role=msg.get("role", "user"),
+                    content=msg.get("content", ""),
+                    timestamp=msg.get("timestamp"),
+                    metadata=msg.get("metadata"),
+                )
             )
-        ],
+    
+    # Add current user message
+    messages.append(
+        Message(
+            role="user",
+            content=user_message,
+            timestamp=timestamp,
+            metadata=None,
+        )
+    )
+    
+    return AgentState(
+        messages=messages,
         user_id=user_id,
         session_id=session_id,
+        email=email,
+        person_id=person_id,
+        company_id=company_id,
         intent="",
         requires_db_query=False,
         clarification_needed=False,

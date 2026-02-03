@@ -160,3 +160,8 @@ dump-*.sql
 
 # Training data
 data/training/
+
+# Session database (SQLite)
+.data/
+*.db
+*.db-journal

@@ -314,6 +314,7 @@ class DatabaseTools:
         self,
         sql: str,
         limit: int = 1000,
+        user_context: dict | None = None,
     ) -> ToolResponse:
         """
         Execute a validated SQL SELECT query.
@@ -323,6 +324,7 @@ class DatabaseTools:
         Args:
             sql: The SQL query to execute
             limit: Maximum number of results (default 1000)
+            user_context: Optional dict with user info for audit logging
             
         Returns:
             ToolResponse with query results
@@ -330,7 +332,12 @@ class DatabaseTools:
         # Validate the SQL
         is_valid, error = self.validator.validate(sql)
         if not is_valid:
-            logger.warning("SQL validation failed", error=error, sql=sql[:200])
+            logger.warning(
+                "SQL validation failed",
+                error=error,
+                sql=sql[:200],
+                user_context=user_context,
+            )
             return ToolResponse(
                 success=False,
                 error=f"SQL validation failed: {error}",
@@ -340,23 +347,66 @@ class DatabaseTools:
         # Add LIMIT if missing
         sql = self.validator.add_limit_if_missing(sql, limit)
 
+        # Extract tables accessed for audit logging
+        tables_accessed = self._extract_tables_from_sql(sql)
+
         try:
-            logger.info("Executing query", sql_preview=sql[:100])
+            logger.info(
+                "Executing query",
+                sql_preview=sql[:100],
+                tables_accessed=tables_accessed,
+                user_id=user_context.get("user_id") if user_context else None,
+                person_id=user_context.get("person_id") if user_context else None,
+                email=user_context.get("email") if user_context else None,
+            )
             result = await self.session.execute(text(sql))
             rows = result.mappings().all()
+            
+            # Audit log successful query
+            logger.info(
+                "Query executed successfully",
+                row_count=len(rows),
+                tables_accessed=tables_accessed,
+                user_id=user_context.get("user_id") if user_context else None,
+                person_id=user_context.get("person_id") if user_context else None,
+            )
             
             return ToolResponse(
                 success=True,
                 data=[dict(row) for row in rows],
                 row_count=len(rows),
-                metadata={"type": "query_result"},
+                metadata={
+                    "type": "query_result",
+                    "tables_accessed": tables_accessed,
+                },
             )
         except Exception as e:
-            logger.error("Query execution failed", error=str(e), sql=sql[:200])
+            logger.error(
+                "Query execution failed",
+                error=str(e),
+                sql=sql[:200],
+                tables_accessed=tables_accessed,
+                user_id=user_context.get("user_id") if user_context else None,
+                person_id=user_context.get("person_id") if user_context else None,
+            )
             return ToolResponse(
                 success=False,
                 error=f"Query execution failed: {str(e)}",
             )
+
+    def _extract_tables_from_sql(self, sql: str) -> list[str]:
+        """Extract table names from SQL for audit logging."""
+        try:
+            import sqlglot
+            from sqlglot import exp
+            
+            parsed = sqlglot.parse_one(sql, dialect="postgres")
+            tables = []
+            for table in parsed.find_all(exp.Table):
+                tables.append(table.name)
+            return list(set(tables))
+        except Exception:
+            return []
 
     async def get_sample_data(
         self,

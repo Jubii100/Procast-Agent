@@ -156,3 +156,86 @@ class ErrorResponse(BaseModel):
         default_factory=datetime.utcnow,
         description="Timestamp of error",
     )
+
+
+# =============================================================================
+# Session Management Schemas
+# =============================================================================
+
+
+class SessionCreate(BaseModel):
+    """Request model for creating a new session."""
+    
+    title: Optional[str] = Field(
+        default=None,
+        max_length=512,
+        description="Optional session title",
+    )
+
+
+class SessionResponse(BaseModel):
+    """Response model for a session."""
+    
+    id: str = Field(..., description="Session UUID")
+    user_id: str = Field(..., description="User identifier")
+    email: Optional[str] = Field(default=None, description="User email")
+    person_id: Optional[str] = Field(default=None, description="Procast person ID")
+    company_id: Optional[str] = Field(default=None, description="Procast company ID")
+    title: Optional[str] = Field(default=None, description="Session title")
+    created_at: datetime = Field(..., description="Session creation timestamp")
+    last_activity: datetime = Field(..., description="Last activity timestamp")
+    message_count: int = Field(default=0, description="Number of messages in session")
+
+
+class SessionListResponse(BaseModel):
+    """Response model for listing sessions."""
+    
+    sessions: list[SessionResponse] = Field(..., description="List of sessions")
+    total: int = Field(..., description="Total number of sessions")
+
+
+class MessageCreate(BaseModel):
+    """Request model for adding a message."""
+    
+    role: str = Field(
+        ...,
+        pattern="^(user|assistant|system)$",
+        description="Message role",
+    )
+    content: str = Field(
+        ...,
+        min_length=1,
+        description="Message content",
+    )
+    metadata: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Optional message metadata",
+    )
+
+
+class MessageResponse(BaseModel):
+    """Response model for a message."""
+    
+    id: int = Field(..., description="Message ID")
+    session_id: str = Field(..., description="Session UUID")
+    role: str = Field(..., description="Message role")
+    content: str = Field(..., description="Message content")
+    timestamp: datetime = Field(..., description="Message timestamp")
+    metadata: Optional[dict[str, Any]] = Field(default=None, description="Message metadata")
+
+
+class SessionDetailResponse(BaseModel):
+    """Response model for session with messages."""
+    
+    session: SessionResponse = Field(..., description="Session info")
+    messages: list[MessageResponse] = Field(..., description="Session messages")
+
+
+class EventResponse(BaseModel):
+    """Response model for an event."""
+    
+    id: int = Field(..., description="Event ID")
+    session_id: str = Field(..., description="Session UUID")
+    event_type: str = Field(..., description="Event type")
+    payload: Optional[dict[str, Any]] = Field(default=None, description="Event payload")
+    timestamp: datetime = Field(..., description="Event timestamp")

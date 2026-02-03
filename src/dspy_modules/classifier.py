@@ -16,11 +16,12 @@ class IntentClassifier(dspy.Module):
     Classifies user intent for routing to appropriate handlers.
     
     Determines whether a question needs database access, requires
-    clarification, or can be answered with general information.
+    clarification, can be answered with general information, or is
+    a friendly conversational message (greeting/small talk).
     """
 
     # Valid intents
-    VALID_INTENTS = {"db_query", "clarify", "general_info"}
+    VALID_INTENTS = {"db_query", "clarify", "general_info", "friendly_chat"}
 
     def __init__(self):
         """Initialize the intent classifier."""

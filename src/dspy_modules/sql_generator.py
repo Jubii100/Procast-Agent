@@ -1,6 +1,9 @@
 """SQL Generator DSPy module for Procast AI."""
 
 from typing import Optional
+import re
+import sqlglot
+from sqlglot import exp
 
 import dspy
 import structlog
@@ -90,6 +93,28 @@ class SQLGenerator(dspy.Module):
             schema_context=schema_context,
             table_descriptions=table_descriptions,
         )
+
+        # Post-process: ensure ROUND() uses numeric to avoid double precision errors
+        if result.sql_query:
+            original_sql = result.sql_query
+            parse_ok = False
+            round_casts = 0
+            try:
+                parsed = sqlglot.parse_one(result.sql_query, dialect="postgres")
+                parse_ok = parsed is not None
+                if parsed:
+                    for node in parsed.find_all(exp.Round):
+                        if node.this and not isinstance(node.this, exp.Cast):
+                            node.set(
+                                "this",
+                                exp.Cast(this=node.this, to=exp.DataType.build("numeric")),
+                            )
+                            round_casts += 1
+                    result.sql_query = parsed.sql(dialect="postgres")
+            except Exception:
+                result.sql_query = original_sql
+            if not parse_ok:
+                result.sql_query = original_sql
         
         logger.debug(
             "SQL generated",

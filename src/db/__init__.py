@@ -3,6 +3,8 @@
 from src.db.connection import (
     get_async_engine,
     get_async_session,
+    get_scoped_async_session,
+    lookup_person_by_email,
     DatabaseManager,
 )
 from src.db.schema_registry import (
@@ -15,7 +17,9 @@ from src.db.schema_registry import (
 
 __all__ = [
     "get_async_engine",
-    "get_async_session", 
+    "get_async_session",
+    "get_scoped_async_session",
+    "lookup_person_by_email",
     "DatabaseManager",
     "get_db_summary",
     "get_all_domains",

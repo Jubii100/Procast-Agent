@@ -24,6 +24,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.29.0",
     "psycopg2-binary>=2.9.9",
+    "aiosqlite>=0.19.0",  # For session storage
     
     # API Framework
     "fastapi>=0.115.0",

@@ -81,7 +81,13 @@ class IntentClassifierSignature(dspy.Signature):
     """Classify user intent for routing to appropriate handlers.
     
     Determine if the question requires database access, clarification,
-    or can be answered with general information.
+    general information, or is a friendly conversational message.
+    
+    Examples of friendly_chat:
+    - "hi", "hello", "hey there"
+    - "how are you?", "what's up?"
+    - "thanks", "thank you", "goodbye"
+    - General small talk not related to budget/data analysis
     """
     
     question: str = dspy.InputField(
@@ -93,7 +99,7 @@ class IntentClassifierSignature(dspy.Signature):
     
     intent: str = dspy.OutputField(
         desc="One of: 'db_query' (needs database), 'clarify' (needs more info), "
-             "'general_info' (can answer without database)"
+             "'general_info' (can answer without database), 'friendly_chat' (greeting/small talk)"
     )
     requires_db_query: bool = dspy.OutputField(
         desc="True if the question requires querying the database"

@@ -25,6 +25,18 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable LLM caching for this run",
     )
+    parser.add_argument(
+        "--email",
+        type=str,
+        default=None,
+        help="User email for RLS scoping (enables scoped queries)",
+    )
+    parser.add_argument(
+        "--user-id",
+        type=str,
+        default="test-user",
+        help="User ID for the test run",
+    )
     return parser.parse_args()
 
 
@@ -69,6 +81,12 @@ async def main() -> None:
         await agent.initialize()
         print("Agent initialized successfully")
 
+        # Log scoping info
+        if args.email:
+            print(f"RLS Scoping enabled for: {args.email}")
+        else:
+            print("RLS Scoping: DISABLED (no email provided, queries may see all data)")
+
         questions = [
             "What is the total budget across all active projects?",
             (
@@ -83,7 +101,8 @@ async def main() -> None:
         for question in questions:
             result = await agent.query(
                 question=question,
-                user_id="test-user",
+                user_id=args.user_id,
+                email=args.email,
                 use_cache=use_cache,
             )
             response = result.get("response")

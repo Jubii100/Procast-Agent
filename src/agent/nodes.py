@@ -235,7 +235,8 @@ async def execute_query_node(state: AgentState) -> dict[str, Any]:
     """
     Node: Execute the validated SQL query.
     
-    Uses the read-only database connection.
+    Uses the scoped database connection with RLS filtering based on
+    the user's person_id or email.
     """
     logger.info("Executing query", session_id=state["session_id"])
     
@@ -245,15 +246,33 @@ async def execute_query_node(state: AgentState) -> dict[str, Any]:
             "query_error": "No SQL query to execute",
         }
     
+    # Get user context for RLS scoping and audit logging
+    person_id = state.get("person_id")
+    email = state.get("email")
+    user_id = state.get("user_id")
+    
+    # Build user context for audit logging
+    user_context = {
+        "user_id": user_id,
+        "person_id": person_id,
+        "email": email,
+    }
+    
     try:
-        async with DatabaseManager.get_readonly_session() as session:
+        # Use scoped session for RLS enforcement
+        async with DatabaseManager.get_scoped_session(
+            person_id=person_id,
+            email=email,
+        ) as session:
             tools = DatabaseTools(session)
-            result = await tools.execute_query(sql=sql)
+            result = await tools.execute_query(sql=sql, user_context=user_context)
             
             if result.success:
                 logger.info(
-                    "Query executed",
+                    "Query executed with RLS scope",
                     row_count=result.row_count,
+                    person_id=person_id,
+                    email=email,
                 )
                 return {
                     "query_results": result.data,
@@ -407,6 +426,42 @@ async def handle_general_info_node(state: AgentState) -> dict[str, Any]:
 
 Please ask a specific question about your budget data, and I'll query the database to provide insights."""
 
+    message_update = add_assistant_message(state, response)
+    
+    return {
+        "response": response,
+        "processing_completed": datetime.utcnow().isoformat(),
+        **message_update,
+    }
+
+
+async def handle_friendly_chat_node(state: AgentState) -> dict[str, Any]:
+    """
+    Node: Handle friendly conversational messages.
+    
+    Responds to greetings, small talk, and general pleasantries
+    without triggering any database queries.
+    """
+    logger.info("Handling friendly chat", session_id=state["session_id"])
+    
+    # Get the user's message to personalize the response
+    user_message = state["messages"][-1]["content"].lower().strip()
+    
+    # Simple pattern matching for common greetings
+    if any(greeting in user_message for greeting in ["hi", "hello", "hey", "greetings"]):
+        response = "Hello! I'm Procast AI, your budget analysis assistant. How can I help you with your event budget data today?"
+    elif any(phrase in user_message for phrase in ["how are you", "how's it going", "what's up"]):
+        response = "I'm doing great, thank you for asking! I'm here and ready to help you analyze your budget data. What would you like to know?"
+    elif any(phrase in user_message for phrase in ["thank", "thanks", "appreciate"]):
+        response = "You're welcome! If you have any more questions about your budget data, feel free to ask."
+    elif any(phrase in user_message for phrase in ["bye", "goodbye", "see you", "later"]):
+        response = "Goodbye! Feel free to come back anytime you need help with budget analysis."
+    elif any(phrase in user_message for phrase in ["good morning", "good afternoon", "good evening"]):
+        response = "Good day to you! I'm Procast AI, ready to help you with budget analysis. What can I assist you with?"
+    else:
+        # Default friendly response
+        response = "Hello! I'm Procast AI, your budget analysis assistant. I can help you analyze project budgets, identify spending patterns, and provide financial insights. What would you like to know about your budget data?"
+    
     message_update = add_assistant_message(state, response)
     
     return {

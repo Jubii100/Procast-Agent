@@ -16,6 +16,7 @@ from src.agent.nodes import (
     format_response_node,
     handle_clarification_node,
     handle_general_info_node,
+    handle_friendly_chat_node,
     handle_error_node,
 )
 from src.agent.routing import (
@@ -104,6 +105,7 @@ def create_agent_graph() -> StateGraph:
     workflow.add_node("format_response", format_response_node)
     workflow.add_node("handle_clarification", handle_clarification_node)
     workflow.add_node("handle_general_info", handle_general_info_node)
+    workflow.add_node("handle_friendly_chat", handle_friendly_chat_node)
     workflow.add_node("handle_error", handle_error_node)
     
     # Set entry point
@@ -117,6 +119,7 @@ def create_agent_graph() -> StateGraph:
             "select_tables": "select_tables",  # Route to table selection first
             "handle_clarification": "handle_clarification",
             "handle_general_info": "handle_general_info",
+            "handle_friendly_chat": "handle_friendly_chat",
         }
     )
     
@@ -155,6 +158,7 @@ def create_agent_graph() -> StateGraph:
     workflow.add_edge("format_response", END)
     workflow.add_edge("handle_clarification", END)
     workflow.add_edge("handle_general_info", END)
+    workflow.add_edge("handle_friendly_chat", END)
     workflow.add_edge("handle_error", END)
     
     # Compile and return
@@ -208,7 +212,11 @@ class ProcastAgent:
         question: str,
         user_id: str = "anonymous",
         session_id: Optional[str] = None,
+        email: Optional[str] = None,
+        person_id: Optional[str] = None,
+        company_id: Optional[str] = None,
         use_cache: Optional[bool] = None,
+        conversation_history: Optional[list[dict]] = None,
     ) -> dict:
         """
         Run a query through the agent.
@@ -217,7 +225,11 @@ class ProcastAgent:
             question: The user's question
             user_id: User identifier
             session_id: Session identifier
+            email: User's email for RLS scoping (used to lookup person_id)
+            person_id: Pre-resolved person_id (from JWT, takes precedence over email)
+            company_id: Pre-resolved company_id (from JWT)
             use_cache: Override LLM caching for this query (True/False)
+            conversation_history: Optional pre-loaded conversation history
             
         Returns:
             Dictionary with response and metadata
@@ -229,14 +241,44 @@ class ProcastAgent:
             "Processing query",
             question=question[:100],
             user_id=user_id,
+            email=email,
+            person_id=person_id,
             use_cache=use_cache,
+            history_length=len(conversation_history) if conversation_history else 0,
         )
         
-        # Create initial state
+        # Load conversation history from session if available and not provided
+        loaded_history = conversation_history
+        if session_id and not loaded_history:
+            try:
+                from src.sessions.repo import SessionRepository
+                loaded_history = await SessionRepository.get_conversation_history(
+                    session_id=session_id,
+                    max_messages=20,  # Limit context window
+                )
+                if loaded_history:
+                    logger.debug(
+                        "Loaded conversation history",
+                        session_id=session_id,
+                        message_count=len(loaded_history),
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Failed to load conversation history",
+                    session_id=session_id,
+                    error=str(e),
+                )
+                loaded_history = None
+        
+        # Create initial state with history
         initial_state = create_initial_state(
             user_message=question,
             user_id=user_id,
             session_id=session_id,
+            email=email,
+            person_id=person_id,
+            company_id=company_id,
+            conversation_history=loaded_history,
         )
 
         cache_state = None

@@ -15,6 +15,7 @@ from src.api.schemas import (
     SessionCreateResponse,
 )
 from src.core.config import settings
+from src.sessions.repo import SessionRepository
 
 logger = structlog.get_logger(__name__)
 
@@ -42,28 +43,98 @@ async def analyze(
     
     This endpoint accepts a natural language query about budget data
     and returns an AI-generated analysis with recommendations.
+    
+    RLS scoping is applied based on the user's email/person_id.
+    Messages and events are persisted to the session database.
     """
     logger.info(
         "Analyze request received",
         user_id=user.user_id,
+        email=user.email,
+        person_id=user.person_id,
         query_preview=request.query[:50],
     )
     
     try:
+        # Get or create session for persistence
+        session, was_created = await SessionRepository.get_or_create_session(
+            session_id=request.session_id,
+            user_id=user.user_id,
+            email=user.email,
+            person_id=user.person_id,
+            company_id=user.company_id,
+        )
+        session_id = session.id
+        
+        # Log user message
+        await SessionRepository.add_message(
+            session_id=session_id,
+            role="user",
+            content=request.query,
+            metadata={"context": request.context} if request.context else None,
+        )
+        
         # Get the agent
         agent = await get_agent()
         
-        # Run the query
+        # Run the query with user context for RLS scoping
         result = await agent.query(
             question=request.query,
             user_id=user.user_id,
-            session_id=request.session_id,
+            session_id=session_id,
+            email=user.email,
+            person_id=user.person_id,
+            company_id=user.company_id,
         )
+        
+        # Log assistant response
+        response_text = result.get("response", "")
+        if response_text:
+            await SessionRepository.add_message(
+                session_id=session_id,
+                role="assistant",
+                content=response_text,
+                metadata={
+                    "confidence": result.get("confidence"),
+                    "row_count": result.get("row_count"),
+                },
+            )
+        
+        # Log events for agent behavior tracking
+        if result.get("sql_query"):
+            await SessionRepository.log_event(
+                session_id=session_id,
+                event_type="sql_generated",
+                payload={
+                    "sql": result.get("sql_query"),
+                    "explanation": result.get("sql_explanation"),
+                },
+            )
+        
+        if result.get("metadata"):
+            metadata = result.get("metadata", {})
+            await SessionRepository.log_event(
+                session_id=session_id,
+                event_type="query_completed",
+                payload={
+                    "intent": metadata.get("intent"),
+                    "domains": metadata.get("selected_domains"),
+                    "llm_calls": metadata.get("total_llm_calls"),
+                    "db_queries": metadata.get("total_db_queries"),
+                    "confidence": result.get("confidence"),
+                },
+            )
+        
+        # Update session title if this is the first message
+        if was_created and not session.title:
+            # Use first 50 chars of query as title
+            title = request.query[:50] + ("..." if len(request.query) > 50 else "")
+            await SessionRepository.update_session_title(session_id, title)
         
         logger.info(
             "Analyze request completed",
             user_id=user.user_id,
-            session_id=result.get("session_id"),
+            session_id=session_id,
             confidence=result.get("confidence"),
         )
         
@@ -74,7 +145,7 @@ async def analyze(
             confidence=result.get("confidence", 0.0),
             data=result.get("data"),
             row_count=result.get("row_count", 0),
-            session_id=result.get("session_id", ""),
+            session_id=session_id,
             sql_query=result.get("sql_query"),
             metadata=result.get("metadata"),
             error=result.get("error"),

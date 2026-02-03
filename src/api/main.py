@@ -11,10 +11,13 @@ from fastapi.responses import JSONResponse
 from src.api.middleware.auth import AuthMiddleware
 from src.api.routes.analyze import router as analyze_router
 from src.api.routes.schema import router as schema_router
+from src.api.routes.sessions import router as sessions_router
+from src.api.routes.stream import router as stream_router
 from src.api.schemas import HealthResponse, ErrorResponse
 from src.agent.graph import get_agent
 from src.core.config import settings
 from src.db.connection import DatabaseManager
+from src.sessions.db import SessionDB
 
 logger = structlog.get_logger(__name__)
 
@@ -26,9 +29,13 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Procast AI API")
     
     try:
-        # Initialize database
+        # Initialize main database (Postgres)
         await DatabaseManager.initialize(use_readonly=True)
         logger.info("Database initialized")
+        
+        # Initialize session database (SQLite)
+        await SessionDB.initialize()
+        logger.info("Session database initialized")
         
         # Pre-initialize agent (optional, for faster first request)
         # agent = await get_agent()
@@ -42,6 +49,7 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down Procast AI API")
+    await SessionDB.close()
     await DatabaseManager.close()
 
 
@@ -103,6 +111,8 @@ POST /api/v1/analyze
     # Include routers
     app.include_router(analyze_router)
     app.include_router(schema_router)
+    app.include_router(sessions_router)
+    app.include_router(stream_router)
     
     # Health check endpoint
     @app.get(
@@ -114,13 +124,17 @@ POST /api/v1/analyze
     )
     async def health_check() -> HealthResponse:
         """Check API health status."""
-        # Check database
+        # Check main database
         db_health = await DatabaseManager.health_check()
+        
+        # Check session database
+        session_db_health = await SessionDB.health_check()
         
         # Check agent (don't initialize, just check status)
         agent_status = {
             "status": "ready",
             "llm_configured": bool(settings.anthropic_api_key),
+            "session_db": session_db_health,
         }
         
         overall_status = "healthy" if db_health["status"] == "healthy" else "unhealthy"
