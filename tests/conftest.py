@@ -1,12 +1,21 @@
 """Pytest configuration and fixtures."""
 
 import asyncio
+import os
+import time
 from typing import AsyncGenerator, Generator
 
+import jwt
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
+
+
+# Ensure JWT settings for tests
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
+os.environ.setdefault("JWT_ISSUER", "procast-ai")
+os.environ.setdefault("JWT_AUDIENCE", "procast-ui")
 
 
 @pytest.fixture(scope="session")
@@ -20,9 +29,20 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
 @pytest.fixture
 def test_user_headers() -> dict[str, str]:
     """Headers for authenticated test requests."""
+    now_epoch = int(time.time())
+    payload = {
+        "sub": "test-user-123",
+        "email": "test@procast.local",
+        "roles": ["user"],
+        "scope": "budget:read budget:analyze",
+        "iat": now_epoch,
+        "exp": now_epoch + 3600,
+        "iss": os.environ["JWT_ISSUER"],
+        "aud": os.environ["JWT_AUDIENCE"],
+    }
+    token = jwt.encode(payload, os.environ["JWT_SECRET_KEY"], algorithm="HS256")
     return {
-        "X-User-ID": "test-user-123",
-        "X-User-Email": "test@procast.local",
+        "Authorization": f"Bearer {token}",
     }
 
 

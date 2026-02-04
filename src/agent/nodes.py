@@ -1,6 +1,6 @@
 """LangGraph node functions for the Procast AI agent."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import structlog
@@ -355,7 +355,7 @@ async def format_response_node(state: AgentState) -> dict[str, Any]:
     
     return {
         "response": response,
-        "processing_completed": datetime.utcnow().isoformat(),
+        "processing_completed": datetime.now(timezone.utc).isoformat(),
         **message_update,
     }
 
@@ -377,7 +377,7 @@ async def handle_clarification_node(state: AgentState) -> dict[str, Any]:
     
     return {
         "response": response,
-        "processing_completed": datetime.utcnow().isoformat(),
+        "processing_completed": datetime.now(timezone.utc).isoformat(),
         **message_update,
     }
 
@@ -411,7 +411,7 @@ Please ask a specific question about your budget data, and I'll query the databa
     
     return {
         "response": response,
-        "processing_completed": datetime.utcnow().isoformat(),
+        "processing_completed": datetime.now(timezone.utc).isoformat(),
         **message_update,
     }
 
@@ -440,6 +440,6 @@ async def handle_error_node(state: AgentState) -> dict[str, Any]:
     
     return {
         "response": response,
-        "processing_completed": datetime.utcnow().isoformat(),
+        "processing_completed": datetime.now(timezone.utc).isoformat(),
         **message_update,
     }

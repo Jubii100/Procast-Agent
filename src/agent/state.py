@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Optional, TypedDict
 import operator
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class Message(TypedDict):
@@ -89,7 +89,7 @@ def create_initial_state(
     import uuid
     
     session_id = session_id or str(uuid.uuid4())
-    timestamp = datetime.utcnow().isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat()
     
     return AgentState(
         messages=[
@@ -147,7 +147,7 @@ def add_assistant_message(state: AgentState, content: str) -> dict:
             Message(
                 role="assistant",
                 content=content,
-                timestamp=datetime.utcnow().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(),
                 metadata=None,
             )
         ]

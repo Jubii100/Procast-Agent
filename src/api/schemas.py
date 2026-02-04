@@ -1,7 +1,7 @@
 """Pydantic schemas for API request/response models."""
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 from pydantic import BaseModel, Field
 
@@ -74,6 +74,87 @@ class AnalyzeResponse(BaseModel):
     )
 
 
+# ---------------------------------------------------------------------------
+# UI Message Stream Protocol Types (Vercel AI SDK 5+)
+# ---------------------------------------------------------------------------
+
+
+class TextPart(BaseModel):
+    """Text part within a message."""
+
+    type: Literal["text"] = "text"
+    text: str
+
+
+class ToolCallPart(BaseModel):
+    """Tool call part within a message."""
+
+    type: Literal["tool-call"] = "tool-call"
+    toolCallId: str
+    toolName: str
+    args: dict[str, Any]
+
+
+class ToolResultPart(BaseModel):
+    """Tool result part within a message."""
+
+    type: Literal["tool-result"] = "tool-result"
+    toolCallId: str
+    result: Any
+
+
+MessagePart = TextPart | ToolCallPart | ToolResultPart
+
+
+class ChatMessage(BaseModel):
+    """Chat message supporting both legacy and UI Message Stream formats."""
+
+    role: Literal["user", "assistant", "system"]
+    # Legacy format (backwards compatibility)
+    content: Optional[str] = None
+    # New format (UI Message Stream Protocol)
+    parts: Optional[list[MessagePart]] = None
+
+    def get_text_content(self) -> str:
+        """Extract text content from message, supporting both formats."""
+        # New format: parts array
+        if self.parts:
+            text_parts = [
+                part.text for part in self.parts if isinstance(part, TextPart)
+            ]
+            return "".join(text_parts)
+        # Legacy format: content string
+        if self.content:
+            return self.content
+        return ""
+
+    def get_tool_calls(self) -> list[ToolCallPart]:
+        """Extract tool calls from message parts."""
+        if not self.parts:
+            return []
+        return [part for part in self.parts if isinstance(part, ToolCallPart)]
+
+
+class ChatStreamRequest(BaseModel):
+    """Request payload for streaming chat."""
+
+    session_id: str = Field(..., description="Session ID for persistence")
+    messages: list[ChatMessage] = Field(
+        ...,
+        description="Conversation messages (supports legacy content or parts array)",
+    )
+    model: Optional[str] = Field(
+        default=None,
+        description="Optional model override",
+    )
+    temperature: Optional[float] = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="Sampling temperature",
+    )
+
+
 class SchemaInfo(BaseModel):
     """Database schema information."""
     
@@ -139,6 +220,31 @@ class SessionCreateResponse(BaseModel):
     session_id: str
     user_id: str
     created_at: datetime
+
+
+class SessionResponse(BaseModel):
+    """Session response for list endpoints."""
+
+    id: str
+    title: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+
+class MessageResponse(BaseModel):
+    """Message response for session detail."""
+
+    id: str
+    session_id: str
+    role: Literal["user", "assistant", "system"]
+    content: str
+    created_at: datetime
+
+
+class SessionDetailResponse(SessionResponse):
+    """Session detail response with message history."""
+
+    messages: list[MessageResponse]
 
 
 class ErrorResponse(BaseModel):

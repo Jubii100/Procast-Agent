@@ -114,7 +114,43 @@ docker-compose --profile setup run db-setup
 
 ## API Usage
 
-### Analyze Budget Data
+### Chat API (Streaming)
+
+The primary interface for the Next.js frontend uses real-time streaming with the **Vercel AI SDK 5+ UI Message Stream Protocol** (NDJSON format).
+
+```bash
+curl -X POST http://localhost:8000/api/v1/chat/stream \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <jwt>" \
+  -d '{
+    "session_id": "sess_123",
+    "messages": [
+      {"role": "user", "parts": [{"type": "text", "text": "What is the budget status?"}]}
+    ]
+  }'
+```
+
+**Streaming Features:**
+- Real-time events as agent nodes execute (classify, generate SQL, execute query, etc.)
+- NDJSON format (`text/plain`) compatible with Vercel AI SDK `useChat`
+- Tool status updates for live progress indication
+- Text response streamed in chunks
+
+See [docs/CHAT_API_PROTOCOL.md](docs/CHAT_API_PROTOCOL.md) for the full protocol specification.
+
+### Session Management
+
+```bash
+# List sessions
+curl http://localhost:8000/api/v1/sessions \
+  -H "Authorization: Bearer <jwt>"
+
+# Get session with message history
+curl http://localhost:8000/api/v1/sessions/sess_123 \
+  -H "Authorization: Bearer <jwt>"
+```
+
+### Analyze Budget Data (Legacy)
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/analyze \
@@ -152,7 +188,10 @@ curl http://localhost:8000/api/v1/schema \
 procast-ai/
 ├── docs/                      # Documentation
 │   ├── DATABASE_SCHEMA.md     # Database schema documentation
-│   └── ERD.md                 # Entity relationship diagrams
+│   ├── ERD.md                 # Entity relationship diagrams
+│   ├── CHAT_API_PROTOCOL.md   # Chat streaming API specification
+│   ├── BACKEND_API_UPGRADE_SPEC.md  # UI Message Stream Protocol spec
+│   └── BACKEND_NDJSON_SPEC.md # NDJSON format specification
 ├── scripts/                   # Setup scripts
 │   └── setup_db.sh           # Database setup script
 ├── data/training/            # DSPy training data
@@ -161,8 +200,10 @@ procast-ai/
 ├── src/
 │   ├── api/                  # FastAPI application
 │   │   ├── main.py          # App entry point
-│   │   ├── schemas.py       # Pydantic models
+│   │   ├── schemas.py       # Pydantic models (incl. UI Message Stream types)
 │   │   ├── routes/          # API routes
+│   │   │   ├── chat.py      # Streaming chat endpoint
+│   │   │   └── sessions.py  # Session management
 │   │   └── middleware/      # Auth middleware
 │   ├── agent/               # LangGraph agent
 │   │   ├── graph.py         # Workflow definition
@@ -181,6 +222,9 @@ procast-ai/
 │   ├── db/                  # Database layer
 │   │   ├── connection.py    # Connection management
 │   │   └── schema_registry.py # Domain-split schema definitions
+│   ├── sessions/            # Chat session management
+│   │   ├── db.py            # Session/message persistence
+│   │   └── models.py        # Session data models
 │   ├── eval/                # Evaluation
 │   │   └── validator.py     # SQL/result validation
 │   └── core/                # Core utilities
@@ -199,10 +243,13 @@ Key environment variables:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DATABASE_URL_READONLY` | Read-only database URL | Required |
+| `DATABASE_URL` | Admin database URL (for session tables) | Required |
 | `ANTHROPIC_API_KEY` | Claude API key | Required |
 | `LLM_MODEL` | Claude model | `claude-3-5-sonnet-20241022` |
+| `API_HOST` | API host | `0.0.0.0` |
 | `API_PORT` | API port | `8000` |
 | `LOG_LEVEL` | Logging level | `INFO` |
+| `CORS_ORIGINS` | Allowed CORS origins | `http://localhost:3000` |
 
 ## Testing
 
@@ -217,21 +264,41 @@ pytest --cov=src --cov-report=html
 pytest tests/test_mcp.py -v
 ```
 
+## Chat Tables (Migration)
+
+Chat session/message tables are created automatically at API startup.
+
+To initialize them manually:
+```bash
+python - <<'PY'
+import asyncio
+from src.db.connection import DatabaseManager
+from src.sessions.db import ensure_chat_tables
+
+async def main():
+    await DatabaseManager.initialize(use_readonly=False)
+    await ensure_chat_tables()
+    await DatabaseManager.close()
+
+asyncio.run(main())
+PY
+```
+
 ## Security
 
 - **Read-Only Access**: The agent uses a PostgreSQL user with SELECT-only permissions
 - **SQL Validation**: All generated SQL is validated before execution
 - **No DDL/DML**: INSERT, UPDATE, DELETE, DROP operations are blocked
 - **Query Timeout**: 30-second timeout on all queries
-- **JWT Ready**: Auth middleware prepared for JWT token validation
+- **JWT Auth**: All non-public endpoints require `Authorization: Bearer <jwt>`
+
+JWT settings:
+- `JWT_SECRET_KEY` (required for token validation)
+- `JWT_ALGORITHM` (default `HS256`)
+- `JWT_ISSUER` (optional)
+- `JWT_AUDIENCE` (optional)
 
 ## Future Integration
-
-When the .NET backend provides JWT specifications:
-
-1. Update `src/api/middleware/auth.py` with JWT validation
-2. Configure JWT settings in environment
-3. The agent will automatically scope queries to the authenticated user
 
 ## License
 

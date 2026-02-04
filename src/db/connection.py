@@ -45,7 +45,7 @@ class DatabaseManager:
         Initialize database engines and session factories.
         
         Args:
-            use_readonly: If True, initializes the read-only connection for AI agent.
+            use_readonly: If True, initializes only the read-only connection for AI agent.
         """
         logger.info("Initializing database connections")
 
@@ -66,7 +66,7 @@ class DatabaseManager:
             autoflush=False,
         )
 
-        # Optionally create admin engine (for setup scripts, not for AI agent)
+        # Optionally create admin engine (for setup scripts and write operations)
         if not use_readonly:
             admin_url = _convert_to_async_url(str(settings.database_url))
             cls._admin_engine = create_async_engine(
@@ -112,6 +112,15 @@ class DatabaseManager:
         return cls._readonly_engine
 
     @classmethod
+    def get_admin_engine(cls) -> AsyncEngine:
+        """Get the admin async engine for write operations."""
+        if cls._admin_engine is None:
+            raise RuntimeError(
+                "Admin database not initialized. Call DatabaseManager.initialize(use_readonly=False) first."
+            )
+        return cls._admin_engine
+
+    @classmethod
     @asynccontextmanager
     async def get_readonly_session(cls) -> AsyncGenerator[AsyncSession, None]:
         """
@@ -130,6 +139,29 @@ class DatabaseManager:
             yield session
         except Exception as e:
             logger.error("Database session error", error=str(e))
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+    @classmethod
+    @asynccontextmanager
+    async def get_admin_session(cls) -> AsyncGenerator[AsyncSession, None]:
+        """
+        Get an admin database session for write operations.
+
+        This should be used only for system-managed writes (sessions/messages).
+        """
+        if cls._admin_session_factory is None:
+            raise RuntimeError(
+                "Admin database not initialized. Call DatabaseManager.initialize(use_readonly=False) first."
+            )
+
+        session = cls._admin_session_factory()
+        try:
+            yield session
+        except Exception as e:
+            logger.error("Admin database session error", error=str(e))
             await session.rollback()
             raise
         finally:
@@ -186,4 +218,16 @@ async def get_async_engine() -> AsyncEngine:
 async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     """Get a read-only database session."""
     async with DatabaseManager.get_readonly_session() as session:
+        yield session
+
+
+async def get_admin_engine() -> AsyncEngine:
+    """Get the admin async engine."""
+    return DatabaseManager.get_admin_engine()
+
+
+@asynccontextmanager
+async def get_admin_session() -> AsyncGenerator[AsyncSession, None]:
+    """Get an admin database session."""
+    async with DatabaseManager.get_admin_session() as session:
         yield session

@@ -1,6 +1,6 @@
 """LangGraph workflow definition for Procast AI agent."""
 
-from typing import Optional
+from typing import Optional, AsyncGenerator, Any
 
 import structlog
 from langgraph.graph import END, StateGraph
@@ -285,6 +285,136 @@ class ProcastAgent:
                 "processing_completed": final_state.get("processing_completed"),
             },
         }
+
+    async def stream_query(
+        self,
+        question: str,
+        user_id: str = "anonymous",
+        session_id: Optional[str] = None,
+        use_cache: Optional[bool] = None,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """
+        Stream a query through the agent, yielding events as nodes execute.
+
+        Yields events with structure:
+        - {"event": "node_start", "node": "node_name"}
+        - {"event": "node_end", "node": "node_name", "data": {...}}
+        - {"event": "complete", "result": {...}}
+        - {"event": "error", "error": "..."}
+
+        Args:
+            question: The user's question
+            user_id: User identifier
+            session_id: Session identifier
+            use_cache: Override LLM caching for this query
+
+        Yields:
+            Event dictionaries as the agent executes
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        logger.info(
+            "Processing streaming query",
+            question=question[:100],
+            user_id=user_id,
+            use_cache=use_cache,
+        )
+
+        # Create initial state
+        initial_state = create_initial_state(
+            user_message=question,
+            user_id=user_id,
+            session_id=session_id,
+        )
+
+        cache_state = None
+        if use_cache is not None:
+            cache_state = set_lm_cache_enabled(use_cache, initialize=True)
+
+        usage_snapshot = get_lm_usage_snapshot()
+        final_state = None
+
+        try:
+            # Stream events from the graph
+            async for event in self._graph.astream_events(
+                initial_state,
+                version="v2",
+            ):
+                event_kind = event.get("event")
+                
+                # Emit node start events
+                if event_kind == "on_chain_start":
+                    node_name = event.get("name", "")
+                    if node_name and node_name not in ("LangGraph", "__start__"):
+                        yield {
+                            "event": "node_start",
+                            "node": node_name,
+                            "run_id": event.get("run_id"),
+                        }
+
+                # Emit node end events with partial state
+                elif event_kind == "on_chain_end":
+                    node_name = event.get("name", "")
+                    if node_name and node_name not in ("LangGraph", "__start__"):
+                        output = event.get("data", {}).get("output", {})
+                        # Extract useful info from node output
+                        node_data = {}
+                        if isinstance(output, dict):
+                            # Include key fields that are useful for streaming
+                            for key in ["intent", "selected_domains", "generated_sql", 
+                                        "sql_valid", "query_results", "query_row_count",
+                                        "response", "error"]:
+                                if key in output and output[key] is not None:
+                                    node_data[key] = output[key]
+                        
+                        yield {
+                            "event": "node_end",
+                            "node": node_name,
+                            "data": node_data,
+                            "run_id": event.get("run_id"),
+                        }
+                        
+                        # Capture final state from last node
+                        if isinstance(output, dict):
+                            final_state = output
+
+        except Exception as e:
+            logger.error("Streaming query failed", error=str(e))
+            yield {"event": "error", "error": str(e)}
+            return
+        finally:
+            if cache_state is not None:
+                restore_lm_cache_state(cache_state)
+
+        # Log usage
+        if final_state:
+            _log_lm_usage(get_lm_usage_entries(usage_snapshot), final_state.get("session_id"))
+
+        # Yield complete event with final result
+        if final_state:
+            yield {
+                "event": "complete",
+                "result": {
+                    "response": final_state.get("response", ""),
+                    "analysis": final_state.get("analysis"),
+                    "recommendations": final_state.get("recommendations"),
+                    "confidence": final_state.get("confidence", 0.0),
+                    "data": final_state.get("query_results"),
+                    "row_count": final_state.get("query_row_count", 0),
+                    "sql_query": final_state.get("generated_sql"),
+                    "sql_explanation": final_state.get("sql_explanation"),
+                    "session_id": final_state.get("session_id"),
+                    "error": final_state.get("error"),
+                    "metadata": {
+                        "intent": final_state.get("intent"),
+                        "selected_domains": final_state.get("selected_domains"),
+                        "domain_selection_reasoning": final_state.get("domain_selection_reasoning"),
+                        "total_llm_calls": final_state.get("total_llm_calls", 0),
+                        "total_db_queries": final_state.get("total_db_queries", 0),
+                    },
+                },
+            }
 
     async def health_check(self) -> dict:
         """

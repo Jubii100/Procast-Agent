@@ -1,14 +1,17 @@
-"""Authentication middleware for JWT integration (pre-JWT mock implementation)."""
+"""Authentication middleware for JWT integration."""
 
 from dataclasses import dataclass
 from typing import Optional
 
 import structlog
-from fastapi import Header, HTTPException, Request
+from fastapi import HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.core.config import settings
+import jwt
+from jwt import InvalidTokenError
 
 logger = structlog.get_logger(__name__)
 
@@ -44,8 +47,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """
     Authentication middleware.
     
-    Currently implements mock authentication using X-User-ID header.
-    Will be updated to validate JWT tokens when .NET backend integration is ready.
+    Validates JWT tokens from Authorization header.
     """
     
     # Paths that don't require authentication
@@ -53,7 +55,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
     
     async def dispatch(self, request: Request, call_next):
         """Process the request through authentication."""
-        
         # Skip auth for public paths
         if request.url.path in self.PUBLIC_PATHS:
             return await call_next(request)
@@ -62,13 +63,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         user_context = await self._get_user_context(request)
         
         if user_context is None:
-            # For now, create a mock user for testing
-            # In production, this would raise 401
-            user_context = UserContext(
-                user_id=settings.mock_user_id,
-                email=settings.mock_user_email,
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "Missing or invalid authorization token"},
             )
-            logger.debug("Using mock user context", user_id=user_context.user_id)
         
         # Attach user context to request state
         request.state.user = user_context
@@ -79,28 +77,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
         """
         Extract user context from request.
         
-        Currently checks for X-User-ID header (mock auth).
-        Will be updated for JWT validation.
+        Extracts and validates JWT token from Authorization header.
         """
-        # Check for mock auth header
-        user_id = request.headers.get("X-User-ID")
-        if user_id:
-            email = request.headers.get("X-User-Email")
-            return UserContext(user_id=user_id, email=email)
-        
-        # TODO: Implement JWT validation
-        # auth_header = request.headers.get("Authorization")
-        # if auth_header and auth_header.startswith("Bearer "):
-        #     token = auth_header[7:]
-        #     return await self._validate_jwt(token)
-        
-        return None
+        auth_header = request.headers.get("Authorization")
+        if not auth_header:
+            return None
+
+        if not auth_header.startswith("Bearer "):
+            return None
+
+        token = auth_header[7:]
+        return await self._validate_jwt(token)
     
     async def _validate_jwt(self, token: str) -> Optional[UserContext]:
         """
         Validate JWT token and extract user context.
-        
-        TODO: Implement when .NET backend provides JWT specs.
         
         Expected JWT claims:
         - sub: User ID
@@ -108,33 +99,44 @@ class AuthMiddleware(BaseHTTPMiddleware):
         - roles: User roles
         - scope: Granted scopes
         """
-        # Placeholder for JWT validation
-        # import jwt
-        # try:
-        #     payload = jwt.decode(
-        #         token,
-        #         settings.jwt_secret_key,
-        #         algorithms=[settings.jwt_algorithm],
-        #         audience=settings.jwt_audience,
-        #         issuer=settings.jwt_issuer,
-        #     )
-        #     return UserContext(
-        #         user_id=payload["sub"],
-        #         email=payload.get("email"),
-        #         roles=payload.get("roles", []),
-        #         scopes=payload.get("scope", "").split(),
-        #     )
-        # except jwt.InvalidTokenError as e:
-        #     logger.warning("Invalid JWT token", error=str(e))
-        #     return None
-        pass
+        if not settings.jwt_secret_key:
+            logger.error("JWT secret key not configured")
+            return None
+
+        try:
+            decode_kwargs = {
+                "key": settings.jwt_secret_key,
+                "algorithms": [settings.jwt_algorithm],
+                "options": {"require": ["sub"]},
+            }
+            if settings.jwt_audience:
+                decode_kwargs["audience"] = settings.jwt_audience
+            if settings.jwt_issuer:
+                decode_kwargs["issuer"] = settings.jwt_issuer
+
+            payload = jwt.decode(token, **decode_kwargs)
+            scopes = payload.get("scope", "")
+            if isinstance(scopes, str):
+                scopes_list = scopes.split()
+            else:
+                scopes_list = list(scopes or [])
+
+            roles = payload.get("roles", [])
+            if not isinstance(roles, list):
+                roles = [roles]
+
+            return UserContext(
+                user_id=payload["sub"],
+                email=payload.get("email"),
+                roles=roles,
+                scopes=scopes_list,
+            )
+        except InvalidTokenError as e:
+            logger.warning("Invalid JWT token", error=str(e))
+            return None
 
 
-async def get_current_user(
-    request: Request,
-    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
-    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
-) -> UserContext:
+async def get_current_user(request: Request) -> UserContext:
     """
     Dependency to get current user context.
     
@@ -145,14 +147,10 @@ async def get_current_user(
     if hasattr(request.state, "user"):
         return request.state.user
     
-    # Fall back to headers
-    if x_user_id:
-        return UserContext(user_id=x_user_id, email=x_user_email)
-    
-    # Use mock user for local development
-    return UserContext(
-        user_id=settings.mock_user_id,
-        email=settings.mock_user_email,
+    # No user context -> unauthorized
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Missing or invalid authorization token",
     )
 
 

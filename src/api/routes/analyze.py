@@ -1,6 +1,6 @@
 """Analysis endpoints for the Procast AI agent."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import structlog
@@ -115,7 +115,7 @@ async def create_session(
     return SessionCreateResponse(
         session_id=session_id,
         user_id=user.user_id,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )
 
 

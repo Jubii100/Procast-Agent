@@ -82,11 +82,20 @@ class Settings(BaseSettings):
         description="Mock user email for local testing",
     )
 
-    # Future JWT settings (commented out until .NET integration)
-    # jwt_secret_key: str = Field(default="")
-    # jwt_algorithm: str = Field(default="HS256")
-    # jwt_issuer: str = Field(default="procast-backend")
-    # jwt_audience: str = Field(default="procast-ai-agent")
+    # JWT settings
+    jwt_secret_key: str = Field(
+        default="dev-secret-change-me",
+        description="JWT signing secret (override in production)",
+    )
+    jwt_algorithm: str = Field(default="HS256")
+    jwt_issuer: Optional[str] = Field(
+        default=None,
+        description="Expected JWT issuer (optional)",
+    )
+    jwt_audience: Optional[str] = Field(
+        default=None,
+        description="Expected JWT audience (optional)",
+    )
 
     # ==========================================================================
     # Observability

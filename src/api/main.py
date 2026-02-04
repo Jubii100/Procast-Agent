@@ -1,7 +1,7 @@
 """FastAPI application entry point."""
 
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 
 import structlog
 from fastapi import FastAPI, Request
@@ -10,11 +10,14 @@ from fastapi.responses import JSONResponse
 
 from src.api.middleware.auth import AuthMiddleware
 from src.api.routes.analyze import router as analyze_router
+from src.api.routes.chat import router as chat_router
 from src.api.routes.schema import router as schema_router
+from src.api.routes.sessions import router as sessions_router
 from src.api.schemas import HealthResponse, ErrorResponse
 from src.agent.graph import get_agent
 from src.core.config import settings
 from src.db.connection import DatabaseManager
+from src.sessions.db import ensure_chat_tables
 
 logger = structlog.get_logger(__name__)
 
@@ -26,9 +29,13 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Procast AI API")
     
     try:
-        # Initialize database
-        await DatabaseManager.initialize(use_readonly=True)
+        # Initialize database (read-only + admin for writes)
+        await DatabaseManager.initialize(use_readonly=False)
         logger.info("Database initialized")
+
+        # Ensure chat session tables exist
+        await ensure_chat_tables()
+        logger.info("Chat session tables ready")
         
         # Pre-initialize agent (optional, for faster first request)
         # agent = await get_agent()
@@ -63,8 +70,7 @@ AI-powered budget analysis for event planning and management.
 
 ## Authentication
 
-Currently using mock authentication via `X-User-ID` header.
-JWT authentication will be integrated when the .NET backend provides the specification.
+JWT Bearer tokens via the `Authorization` header.
 
 ## Quick Start
 
@@ -103,6 +109,8 @@ POST /api/v1/analyze
     # Include routers
     app.include_router(analyze_router)
     app.include_router(schema_router)
+    app.include_router(sessions_router)
+    app.include_router(chat_router)
     
     # Health check endpoint
     @app.get(
@@ -129,7 +137,7 @@ POST /api/v1/analyze
             status=overall_status,
             database=db_health,
             agent=agent_status,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
     
     # Error handlers
@@ -147,7 +155,7 @@ POST /api/v1/analyze
             content={
                 "detail": "An internal error occurred",
                 "error_type": type(exc).__name__,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         )
     
